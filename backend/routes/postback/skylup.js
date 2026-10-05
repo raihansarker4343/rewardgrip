@@ -25,10 +25,22 @@ const handleSkylupPostback = async (req, res) => {
   try {
     const params = { ...req.query, ...req.body };
 
-    const userId = String(params.user_id || '').trim();
-    const externalTx = String(params.trans_id || params.tx_id || '').trim();
+    const userId = String(
+      params.user_id ||
+      params.sub_id ||
+      params.click_id ||
+      params.pub_click_id ||
+      params.custom1 ||
+      ''
+    ).trim();
+    const externalTx = String(
+      params.trans_id ||
+      params.tx_id ||
+      params.id ||
+      ''
+    ).trim();
     const rawPayout = params.payout || params.amount || '0';
-    const offerId = String(params.offer_id || '').trim();
+    const offerId = String(params.offer_id || params.offerId || '').trim();
 
     if (!userId || !externalTx) {
       console.warn('[Skylup Postback] Missing user_id or trans_id:', params);
