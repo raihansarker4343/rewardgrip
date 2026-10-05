@@ -28,6 +28,8 @@ const handleSkylupPostback = async (req, res) => {
     const userId = String(
       params.user_id ||
       params.sub_id ||
+      params.pub_sub_id ||
+      params.subId ||
       params.click_id ||
       params.pub_click_id ||
       params.custom1 ||
