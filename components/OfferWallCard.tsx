@@ -18,6 +18,8 @@ const OfferWallCard: React.FC<{ wall: OfferWall }> = ({ wall }) => {
         'Lootably': 'from-cyan-900/40 to-slate-900/10',
         'Time Wall': 'from-indigo-900/40 to-slate-900/10',
         'AdGem': 'from-violet-900/40 to-slate-900/10',
+        'Pixylab': 'from-blue-900/40 to-purple-900/20',
+        'Skylup': 'from-blue-900/40 to-purple-900/20',
     };
     const gradient = gradients[wall.name] || 'from-slate-800/40 to-slate-900/10';
 

@@ -56,6 +56,7 @@ const HangMyAdsPage = React.lazy(() => import('./components/pages/offers/HangMyA
 const LootablyPage = React.lazy(() => import('./components/pages/offers/LootablyPage'));
 const TimeWallPage = React.lazy(() => import('./components/pages/offers/TimeWallPage'));
 const AdGemPage = React.lazy(() => import('./components/pages/offers/AdGemPage'));
+const PixylabPage = React.lazy(() => import('./components/pages/offers/PixylabPage'));
 
 // Lazy load "About" pages
 const BlogPage = React.lazy(() => import('./components/about/BlogPage'));
@@ -182,6 +183,8 @@ const pageComponentsMap: { [key: string]: React.ReactNode } = {
   'Lootably': <LootablyPage />,
   'Time Wall': <TimeWallPage />,
   'AdGem': <AdGemPage />,
+  'Pixylab': <PixylabPage />,
+  'Skylup': <PixylabPage />,
   'Referrals': <ReferralsPage />,
   'Leaderboard': <LeaderboardPage />,
   'Daily Bonus': <DailyBonusPage />,
@@ -667,7 +670,7 @@ const App: React.FC = () => {
   const dedicatedPageNames = new Set([
     'Prime Surveys', 'CPX Research', 'Adscend Media Surveys', 'BitLabs', 'inBrain', 'Pollfish', 'TheoremReach', 'Your-Surveys',
     'Torox', 'Adscend Media', 'AdToWall', 'RevU', 'AdGate Media', 'MyChips', 'MM Wall', 'Aye-T Studios',
-    'Monlix', 'Hang My Ads', 'Lootably', 'Time Wall', 'AdGem'
+    'Monlix', 'Hang My Ads', 'Lootably', 'Time Wall', 'AdGem', 'Pixylab', 'Skylup'
   ]);
 
   const isDedicatedView = dedicatedPageNames.has(page);

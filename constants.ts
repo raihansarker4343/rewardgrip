@@ -29,6 +29,7 @@ export const OFFER_WALLS: OfferWall[] = [
     { id: 11, name: 'Lootably', logo: 'https://i.imgur.com/i9nO27d.png', isEnabled: true, isLocked: false, rating: 3 },
     { id: 12, name: 'Time Wall', logo: 'https://i.imgur.com/nJgq1t7.png', isEnabled: true, isLocked: false, rating: 4 },
     { id: 13, name: 'AdGem', logo: 'https://i.imgur.com/r9f5k2Z.png', isEnabled: true, isLocked: false, rating: 4 },
+    { id: 14, name: 'Pixylab', logo: 'https://creatives.skylup.swaarm-clients.com/objects/146/e03421e0-9d27-4f57-9e73-a5b9649fcfec.png', bonus: '+30%', isEnabled: true, isLocked: false, rating: 5 },
 ];
 
 export const SURVEY_PROVIDERS: SurveyProvider[] = [

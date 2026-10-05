@@ -2,7 +2,7 @@ import React, { useContext, useMemo } from 'react';
 import { AppContext } from '../../../App';
 import { SURVEY_PROVIDERS } from '../../../constants';
 
-const CPX_APP_ID = import.meta.env.VITE_CPX_APP_ID || '32220';
+const CPX_APP_ID = import.meta.env.VITE_CPX_APP_ID || '30220';
 
 const CPXResearchPage: React.FC = () => {
   const { user, isLoggedIn } = useContext(AppContext);

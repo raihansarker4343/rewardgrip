@@ -199,5 +199,6 @@ INSERT INTO offer_walls (name, logo, bonus, is_locked, unlock_requirement, is_en
 ('Hang My Ads', 'https://i.imgur.com/yvC5YyW.png', null, true, 'Earn $1.00 to unlock', true),
 ('Lootably', 'https://i.imgur.com/i9nO27d.png', null, false, null, true),
 ('Time Wall', 'https://i.imgur.com/nJgq1t7.png', null, false, null, true),
-('AdGem', 'https://i.imgur.com/r9f5k2Z.png', null, false, null, true)
+('AdGem', 'https://i.imgur.com/r9f5k2Z.png', null, false, null, true),
+('Pixylab', 'https://creatives.skylup.swaarm-clients.com/objects/146/e03421e0-9d27-4f57-9e73-a5b9649fcfec.png', '+30%', false, null, true)
 ON CONFLICT DO NOTHING;

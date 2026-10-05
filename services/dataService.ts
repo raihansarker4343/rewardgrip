@@ -63,7 +63,7 @@ export const dataService = {
           .eq('is_enabled', true)
           .order('id');
         if (!error && Array.isArray(data) && data.length > 0) {
-          result = data.map(row => ({
+          const dbWalls = data.map(row => ({
             id: row.id,
             name: row.name,
             logo: row.logo,
@@ -73,6 +73,11 @@ export const dataService = {
             isEnabled: row.is_enabled,
             rating: row.rating || 4,
           }));
+
+          // Merge any default OFFER_WALLS that are enabled but not yet in the DB
+          const dbNames = new Set(dbWalls.map(w => w.name.toLowerCase()));
+          const missingDefaults = OFFER_WALLS.filter(w => w.isEnabled && !dbNames.has(w.name.toLowerCase()));
+          result = [...dbWalls, ...missingDefaults];
         }
       } catch (sbErr) {
         console.warn('[DataService] Supabase offer_walls notice:', sbErr);
@@ -120,7 +125,7 @@ export const dataService = {
           .eq('is_enabled', true)
           .order('id');
         if (!error && Array.isArray(data) && data.length > 0) {
-          result = data.map(row => ({
+          const dbSurveys = data.map(row => ({
             id: row.id,
             name: row.name,
             logo: row.logo,
@@ -130,6 +135,11 @@ export const dataService = {
             unlockRequirement: row.unlock_requirement,
             isEnabled: row.is_enabled,
           }));
+
+          // Merge any default SURVEY_PROVIDERS that are enabled but not yet in the DB
+          const dbNames = new Set(dbSurveys.map(s => s.name.toLowerCase()));
+          const missingDefaults = SURVEY_PROVIDERS.filter(s => s.isEnabled && !dbNames.has(s.name.toLowerCase()));
+          result = [...dbSurveys, ...missingDefaults];
         }
       } catch (sbErr) {
         console.warn('[DataService] Supabase survey_providers notice:', sbErr);

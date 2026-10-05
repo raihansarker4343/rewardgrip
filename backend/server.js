@@ -72,16 +72,20 @@ app.use(express.json());
 const cpxPostbackRoutes = require('./routes/postback/cpx');
 const bitlabsPostbackRoutes = require('./routes/postback/bitlabs');
 const timewallPostbackRoutes = require('./routes/postback/timewall');
+const skylupPostbackRoutes = require('./routes/postback/skylup');
 
 // 👉 নতুন লাইনটি যোগ করুন:
 const cpxOffersRoutes = require('./routes/postback/offers/cpx_offers');
+const skylupOffersRoutes = require('./routes/offers/skylup');
 
 app.use('/api/postback', cpxPostbackRoutes);     // /api/postback/cpx
 app.use('/api/postback', bitlabsPostbackRoutes); // /api/postback/bitlabs
 app.use('/api/postback', timewallPostbackRoutes);
+app.use('/api/postback', skylupPostbackRoutes);   // /api/postback/skylup & /api/postback/pixylab
 
-// 👉 সার্ভে লিস্ট পাওয়ার জন্য নতুন এন্ডপয়েন্ট:
-app.use('/api/surveys/cpx', cpxOffersRoutes); // এটি এন্ডপয়েন্ট তৈরি করবে: /api/surveys/cpx/get-surveys
+// 👉 অফার ও সার্ভে লিস্ট পাওয়ার এন্ডপয়েন্ট:
+app.use('/api/surveys/cpx', cpxOffersRoutes); // /api/surveys/cpx/get-surveys
+app.use('/api/offers', skylupOffersRoutes);   // /api/offers/skylup
 
 
 
@@ -1550,6 +1554,7 @@ const seedOfferWalls = async () => {
             { name: 'Lootably', logo: 'https://i.imgur.com/i9nO27d.png' },
             { name: 'Time Wall', logo: 'https://i.imgur.com/nJgq1t7.png' },
             { name: 'AdGem', logo: 'https://i.imgur.com/r9f5k2Z.png', rating: 3 },
+            { name: 'Pixylab', logo: 'https://creatives.skylup.swaarm-clients.com/objects/146/e03421e0-9d27-4f57-9e73-a5b9649fcfec.png', bonus: '+30%', is_locked: false },
         ];
         for (const w of walls) {
             await client.query('INSERT INTO offer_walls (name, logo, bonus, is_locked, unlock_requirement) VALUES ($1, $2, $3, $4, $5)', [w.name, w.logo, w.bonus || null, w.is_locked || false, w.unlock_requirement || null]);
