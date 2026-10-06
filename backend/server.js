@@ -197,41 +197,74 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/signin', async (req, res) => {
     const { email, password } = req.body;
     try {
-        const result = await pool.query(
-            `SELECT id, username, email, password_hash, avatar_url, created_at AS joined_date, total_earned, balance, last_30_days_earned, completed_tasks, total_wagered, total_profit, total_withdrawn, total_referrals, referral_earnings, xp, rank, earn_id, is_verified
-             FROM users WHERE email = $1`,
-            [email]
-        );
-        if (result.rows.length === 0) {
-            return res.status(400).json({ message: 'Invalid credentials' });
-        }
-        const user = result.rows[0];
-        const isMatch = await bcrypt.compare(password, user.password_hash);
-        if (!isMatch) {
-            return res.status(400).json({ message: 'Invalid credentials' });
-        }
+        if (pool && process.env.DATABASE_URL) {
+            const result = await pool.query(
+                `SELECT id, username, email, password_hash, avatar_url, created_at AS joined_date, total_earned, balance, last_30_days_earned, completed_tasks, total_wagered, total_profit, total_withdrawn, total_referrals, referral_earnings, xp, rank, earn_id, is_verified
+                 FROM users WHERE email = $1`,
+                [email]
+            );
+            if (result.rows.length > 0) {
+                const user = result.rows[0];
+                const isMatch = await bcrypt.compare(password, user.password_hash);
+                if (!isMatch) {
+                    return res.status(400).json({ message: 'Invalid credentials' });
+                }
 
-        if (!user.is_verified) {
-            await issueVerificationCode(user);
-            return res.status(403).json({ message: 'Please verify your email using the code we sent to you.', requiresVerification: true, email: user.email });
-        }
-        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+                if (!user.is_verified) {
+                    await issueVerificationCode(user);
+                    return res.status(403).json({ message: 'Please verify your email using the code we sent to you.', requiresVerification: true, email: user.email });
+                }
+                const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
 
-        // Update user's ip_logs history by appending the new log
-        const ipLog = createIpLogEntry(req);
-        await pool.query(
-            `UPDATE users 
-             SET ip_logs = COALESCE(ip_logs, '[]'::jsonb) || $1::jsonb 
-             WHERE id = $2`,
-            [JSON.stringify([ipLog]), user.id]
-        );
-        
-        delete user.password_hash; // Don't send password hash to client
-        res.json({ token, user: snakeToCamel(user) });
+                // Update user's ip_logs history by appending the new log
+                const ipLog = createIpLogEntry(req);
+                await pool.query(
+                    `UPDATE users 
+                     SET ip_logs = COALESCE(ip_logs, '[]'::jsonb) || $1::jsonb 
+                     WHERE id = $2`,
+                    [JSON.stringify([ipLog]), user.id]
+                ).catch(() => {});
+                
+                delete user.password_hash;
+                return res.json({ token, user: snakeToCamel(user) });
+            }
+        }
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Server error during signin.' });
+        console.warn('Postgres signin notice:', error.message);
     }
+
+    // Supabase fallback
+    if (supabase) {
+        try {
+            const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (!authErr && authData?.user) {
+                const { data: dbUser } = await supabase
+                    .from('users')
+                    .select('*')
+                    .eq('email', email)
+                    .maybeSingle();
+
+                const u = dbUser || {
+                    id: authData.user.id,
+                    email: authData.user.email,
+                    username: email.split('@')[0],
+                    balance: 0,
+                    totalEarned: 0,
+                };
+                delete u.password_hash;
+                const token = authData.session?.access_token || jwt.sign({ id: u.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' });
+                return res.json({ token, user: snakeToCamel(u) });
+            }
+        } catch (sbErr) {
+            console.warn('Supabase signin notice:', sbErr.message);
+        }
+    }
+
+    return res.status(400).json({ message: 'Invalid email or password.' });
 });
 
 app.post('/api/auth/forgot-password', async (req, res) => {
