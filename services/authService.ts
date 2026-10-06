@@ -452,12 +452,28 @@ export const authService = {
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
-          return Array.isArray(data) ? data : [];
+          if (Array.isArray(data) && data.length > 0) return data;
         }
       } catch (err) {
         console.warn('[AuthService] /api/transactions notice:', err);
       }
     }
+
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('transactions')
+          .select('*')
+          .order('date', { ascending: false })
+          .limit(50);
+        if (data && Array.isArray(data)) {
+          return data as any;
+        }
+      } catch (sbErr) {
+        console.warn('[AuthService] Supabase transactions fetch notice:', sbErr);
+      }
+    }
+
     return [];
   },
 
@@ -473,12 +489,28 @@ export const authService = {
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
-          return Array.isArray(data) ? data : [];
+          if (Array.isArray(data) && data.length > 0) return data;
         }
       } catch (err) {
         console.warn('[AuthService] /api/notifications notice:', err);
       }
     }
+
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('notifications')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20);
+        if (data && Array.isArray(data)) {
+          return data as any;
+        }
+      } catch (sbErr) {
+        console.warn('[AuthService] Supabase notifications fetch notice:', sbErr);
+      }
+    }
+
     return [];
   },
 
