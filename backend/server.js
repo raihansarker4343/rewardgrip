@@ -6,6 +6,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { pool, initDb } = require('./db');
+const { supabase } = require('./supabase');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
@@ -859,72 +860,93 @@ const mapEarningFeedItem = (item) => {
 
 app.get('/api/public/earning-feed', async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT
-                t.id,
-                u.username,
-                u.avatar_url,
-                t.type,
-                t.source,
-                t.method,
-                t.amount
-            FROM transactions t
-            JOIN users u ON t.user_id = u.id
-            WHERE (
-                t.type = ANY($1::text[])
-                AND LOWER(t.status) = 'completed'
-                AND t.amount > 0
-            ) OR (
-                t.type = 'Withdrawal'
-                AND t.status = 'Completed'
-            )
-            ORDER BY t.date DESC
-            LIMIT 15
-        `, [FEED_EARNING_TYPES]);
-        
-        res.json(result.rows.map(mapEarningFeedItem));
+        if (pool && process.env.DATABASE_URL) {
+            const result = await pool.query(`
+                SELECT
+                    t.id,
+                    u.username,
+                    u.avatar_url,
+                    t.type,
+                    t.source,
+                    t.method,
+                    t.amount
+                FROM transactions t
+                JOIN users u ON t.user_id = u.id
+                WHERE (
+                    t.type = ANY($1::text[])
+                    AND LOWER(t.status) = 'completed'
+                    AND t.amount > 0
+                ) OR (
+                    t.type = 'Withdrawal'
+                    AND t.status = 'Completed'
+                )
+                ORDER BY t.date DESC
+                LIMIT 15
+            `, [FEED_EARNING_TYPES]);
+            return res.json(result.rows.map(mapEarningFeedItem));
+        }
     } catch (error) {
-        console.error('Error fetching public earning feed:', error);
-        res.status(500).json({ message: 'Server error fetching earning feed.' });
+        console.warn('Postgres earning feed notice:', error.message);
     }
+
+    // Fallback to Supabase
+    if (supabase) {
+        try {
+            const { data } = await supabase
+                .from('transactions')
+                .select('id, user_id, type, source, method, amount, status, date')
+                .order('date', { ascending: false })
+                .limit(15);
+            if (data && data.length > 0) {
+                return res.json(data.map(mapEarningFeedItem));
+            }
+        } catch (sbErr) {
+            console.warn('Supabase earning feed notice:', sbErr.message);
+        }
+    }
+
+    return res.json([]);
 });
 
 app.get('/api/public/live-cashouts', async (req, res) => {
     try {
-        const [totalRes, itemsRes] = await Promise.all([
-            pool.query(`
-                SELECT COALESCE(SUM(amount), 0) AS total
-                FROM transactions
-                WHERE type = 'Withdrawal'
-                  AND status = 'Completed'
-                  AND date >= NOW() - INTERVAL '30 days'
-            `),
-            pool.query(`
-                SELECT t.id, u.username, t.method, t.amount
-                FROM transactions t
-                JOIN users u ON t.user_id = u.id
-                WHERE t.type = 'Withdrawal'
-                  AND status = 'Completed'
-                ORDER BY t.date DESC
-                LIMIT 24
-            `),
-        ]);
+        if (pool && process.env.DATABASE_URL) {
+            const [totalRes, itemsRes] = await Promise.all([
+                pool.query(`
+                    SELECT COALESCE(SUM(amount), 0) AS total
+                    FROM transactions
+                    WHERE type = 'Withdrawal'
+                      AND status = 'Completed'
+                      AND date >= NOW() - INTERVAL '30 days'
+                `),
+                pool.query(`
+                    SELECT t.id, u.username, t.method, t.amount
+                    FROM transactions t
+                    JOIN users u ON t.user_id = u.id
+                    WHERE t.type = 'Withdrawal'
+                      AND status = 'Completed'
+                    ORDER BY t.date DESC
+                    LIMIT 24
+                `),
+            ]);
 
-        const total30Days = parseFloat(totalRes.rows[0].total) || 0;
+            const total30Days = parseFloat(totalRes.rows[0].total) || 0;
 
-        res.json({
-            total30Days: Number(total30Days.toFixed(2)),
-            items: itemsRes.rows.map((row) => ({
-                id: row.id,
-                method: row.method || 'PayPal',
-                user: row.username,
-                amount: Number(row.amount),
-            })),
-        });
+            return res.json({
+                total30Days: Number(total30Days.toFixed(2)),
+                items: itemsRes.rows.map((row) => ({
+                    id: row.id,
+                    method: row.method || 'PayPal',
+                    user: row.username,
+                    amount: Number(row.amount),
+                })),
+            });
+        }
     } catch (error) {
-        console.error('Error fetching live cashouts:', error);
-        res.status(500).json({ message: 'Server error fetching live cashouts.' });
+        console.warn('Postgres live cashouts notice:', error.message);
     }
+
+    return res.json({ total30Days: 0, items: [] });
 });
 
 app.get('/api/leaderboard', async (req, res) => {
