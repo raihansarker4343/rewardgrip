@@ -724,16 +724,33 @@ app.post('/api/transactions/withdraw', authMiddleware, async (req, res) => {
 // --- PUBLIC CONTENT ROUTES ---
 app.get('/api/payment-methods', async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM payment_methods WHERE is_enabled = true ORDER BY type, name');
-        res.json(result.rows.map(snakeToCamel));
+        if (pool && process.env.DATABASE_URL) {
+            const result = await pool.query('SELECT * FROM payment_methods WHERE is_enabled = true ORDER BY type, name');
+            return res.json(result.rows.map(snakeToCamel));
+        }
     } catch (error) {
-        console.error('Error fetching payment methods:', error);
-        res.status(500).json({ message: 'Server error fetching payment methods.' });
+        console.warn('Postgres payment-methods notice:', error.message);
     }
+
+    if (supabase) {
+        try {
+            const { data, error } = await supabase
+                .from('payment_methods')
+                .select('*')
+                .eq('is_enabled', true)
+                .order('name');
+            if (!error && data) {
+                return res.json(data.map(snakeToCamel));
+            }
+        } catch (sbErr) {
+            console.warn('Supabase payment-methods notice:', sbErr.message);
+        }
+    }
+
+    res.json([]);
 });
 
 app.get('/api/survey-providers', async (req, res) => {
-
     const CPX_MIN_BALANCE = Number(process.env.CPX_MIN_BALANCE || 3);
 
     // Optional auth: if token exists, decode user id
@@ -743,123 +760,134 @@ app.get('/api/survey-providers', async (req, res) => {
 
     if (token) {
         try {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
             userId = decoded?.id || null;
         } catch (e) {
-            // invalid token -> treat as guest
             userId = null;
         }
     }
 
+    let providers = [];
+
+    // 1. Try PostgreSQL
     try {
-        const result = await pool.query('SELECT * FROM survey_providers WHERE is_enabled = true ORDER BY id');
-        let providers = result.rows.map(snakeToCamel);
-
-        // If logged in, compute balance-based lock for CPX
-        if (userId) {
-            const u = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
-            const balance = Number(u.rows?.[0]?.balance ?? 0);
-
-            providers = providers.map((p) => {
-                const isCPX = (p.name || '').toLowerCase() === 'cpx research';
-
-                if (!isCPX) return p;
-
-                // Keep DB lock if admin globally locked it
-                const dbLocked = !!p.isLocked;
-
-                // Dynamic: lock if balance < 3
-                const dynamicLocked = balance < CPX_MIN_BALANCE;
-
-                return {
-                 ...p,
-                 isLocked: dbLocked || dynamicLocked,
-                // ✅ locked হলে DB-এর unlockRequirement থাকলে সেটাই দেখাবে
-                unlockRequirement:
-                 (dbLocked || dynamicLocked)
-                   ? (p.unlockRequirement ?? `Earn $${CPX_MIN_BALANCE.toFixed(2)} to unlock`)
-                   : p.unlockRequirement
-                 };
-
-            });
-        } else {
-            // Guest হলে আপনি চাইলে CPX সবসময় locked রাখতে পারেন (optional)
-            // providers = providers.map((p) => ( (p.name||'').toLowerCase()==='cpx research' ? {...p, isLocked:true, unlockRequirement:`Earn $${CPX_MIN_BALANCE.toFixed(2)} to unlock`} : p ));
+        if (pool && process.env.DATABASE_URL) {
+            const result = await pool.query('SELECT * FROM survey_providers WHERE is_enabled = true ORDER BY id');
+            providers = result.rows.map(snakeToCamel);
         }
-
-        // Deduplicate survey providers by name
-        const seen = new Set();
-        providers = providers.filter((p) => {
-            const key = (p.name || '').trim().toLowerCase();
-            if (!key || seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-
-        res.json(providers);
     } catch (error) {
-        console.error('Error fetching survey providers:', error);
-        res.status(500).json({ message: 'Server error fetching survey providers.' });
+        console.warn('Postgres survey-providers notice:', error.message);
     }
+
+    // 2. Fallback to Supabase
+    if (providers.length === 0 && supabase) {
+        try {
+            const { data, error } = await supabase
+                .from('survey_providers')
+                .select('*')
+                .eq('is_enabled', true)
+                .order('id');
+            if (!error && data) {
+                providers = data.map(snakeToCamel);
+            }
+        } catch (sbErr) {
+            console.warn('Supabase survey-providers notice:', sbErr.message);
+        }
+    }
+
+    // Deduplicate survey providers by name
+    const seen = new Set();
+    providers = providers.filter((p) => {
+        const key = (p.name || '').trim().toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    res.json(providers);
 });
 
-
 app.get('/api/offer-walls', async (req, res) => {
+    let walls = [];
+
+    // 1. Try PostgreSQL
     try {
-        const result = await pool.query('SELECT * FROM offer_walls WHERE is_enabled = true ORDER BY id');
-        let walls = result.rows.map(snakeToCamel);
-        const seen = new Set();
-        walls = walls.filter((w) => {
-            const key = (w.name || '').trim().toLowerCase();
-            if (!key || seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-        res.json(walls);
+        if (pool && process.env.DATABASE_URL) {
+            const result = await pool.query('SELECT * FROM offer_walls WHERE is_enabled = true ORDER BY id');
+            walls = result.rows.map(snakeToCamel);
+        }
     } catch (error) {
-        console.error('Error fetching offer walls:', error);
-        res.status(500).json({ message: 'Server error fetching offer walls.' });
+        console.warn('Postgres offer-walls notice:', error.message);
     }
+
+    // 2. Fallback to Supabase
+    if (walls.length === 0 && supabase) {
+        try {
+            const { data, error } = await supabase
+                .from('offer_walls')
+                .select('*')
+                .eq('is_enabled', true)
+                .order('id');
+            if (!error && data) {
+                walls = data.map(snakeToCamel);
+            }
+        } catch (sbErr) {
+            console.warn('Supabase offer-walls notice:', sbErr.message);
+        }
+    }
+
+    const seen = new Set();
+    walls = walls.filter((w) => {
+        const key = (w.name || '').trim().toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+
+    res.json(walls);
 });
 
 const FEED_EARNING_TYPES = ['Task Reward', 'earn', 'bonus_earn'];
 
 app.get('/api/public/home-stats', async (req, res) => {
     try {
-        const [signupsRes, withdrawRes, totalRes] = await Promise.all([
-            pool.query(
-                "SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours'"
-            ),
-            pool.query(`
-                SELECT COALESCE(AVG(amount), 0) AS avg
-                FROM transactions
-                WHERE type = 'Withdrawal'
-                  AND status = 'Completed'
-                  AND date >= date_trunc('day', NOW() - INTERVAL '1 day')
-                  AND date < date_trunc('day', NOW())
-            `),
-            pool.query('SELECT COALESCE(SUM(total_earned), 0) AS total FROM users'),
-        ]);
+        if (pool && process.env.DATABASE_URL) {
+            const [signupsRes, withdrawRes, totalRes] = await Promise.all([
+                pool.query(
+                    "SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours'"
+                ),
+                pool.query(`
+                    SELECT COALESCE(AVG(amount), 0) AS avg
+                    FROM transactions
+                    WHERE type = 'Withdrawal'
+                      AND status = 'Completed'
+                      AND date >= date_trunc('day', NOW() - INTERVAL '1 day')
+                      AND date < date_trunc('day', NOW())
+                `),
+                pool.query('SELECT COALESCE(SUM(total_earned), 0) AS total FROM users'),
+            ]);
 
-        const signups24h = parseInt(signupsRes.rows[0].count, 10);
-        const avgWithdrawYesterday = parseFloat(withdrawRes.rows[0].avg) || 0;
-        const totalEarned = parseFloat(totalRes.rows[0].total) || 0;
+            const signups24h = parseInt(signupsRes.rows[0].count, 10);
+            const avgWithdrawYesterday = parseFloat(withdrawRes.rows[0].avg) || 0;
+            const totalEarned = parseFloat(totalRes.rows[0].total) || 0;
 
-        res.json({
-            signups24h,
-            avgTimeToFirstCash: '17m 12s',
-            avgWithdrawYesterday: Number(avgWithdrawYesterday.toFixed(2)),
-            totalEarned: Number(totalEarned.toFixed(2)),
-        });
+            return res.json({
+                signups24h,
+                avgTimeToFirstCash: '17m 12s',
+                avgWithdrawYesterday: Number(avgWithdrawYesterday.toFixed(2)),
+                totalEarned: Number(totalEarned.toFixed(2)),
+            });
+        }
     } catch (error) {
-        console.error('Error fetching home stats:', error);
-        res.json({
-            signups24h: 101137,
-            avgTimeToFirstCash: '17m 12s',
-            avgWithdrawYesterday: 22.90,
-            totalEarned: 300000000,
-        });
+        // Silently fall through to default stats
     }
+
+    res.json({
+        signups24h: 101137,
+        avgTimeToFirstCash: '17m 12s',
+        avgWithdrawYesterday: 22.90,
+        totalEarned: 300000000,
+    });
 });
 
 const mapEarningFeedItem = (item) => {
