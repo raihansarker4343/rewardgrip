@@ -1041,13 +1041,42 @@ app.get('/api/public/earning-feed', async (req, res) => {
     // Fallback to Supabase
     if (supabase) {
         try {
-            const { data } = await supabase
+            const { data: recentTxs } = await supabase
                 .from('transactions')
                 .select('id, user_id, type, source, method, amount, status, date')
                 .order('date', { ascending: false })
                 .limit(15);
-            if (data && data.length > 0) {
-                return res.json(data.map(mapEarningFeedItem));
+
+            if (recentTxs && recentTxs.length > 0) {
+                const userIds = [...new Set(recentTxs.map(t => t.user_id).filter(Boolean))];
+                let userMap = new Map();
+                if (userIds.length > 0) {
+                    const { data: users } = await supabase
+                        .from('users')
+                        .select('id, username, avatar_url')
+                        .in('id', userIds);
+                    if (users) {
+                        userMap = new Map(users.map(u => [u.id, u]));
+                    }
+                }
+
+                const enriched = recentTxs.map(t => {
+                    const u = userMap.get(t.user_id);
+                    const rawName = u?.username || `Member_${String(t.user_id || '').slice(-3) || '99'}`;
+                    const avatar = (u?.avatar_url && u.avatar_url.trim() !== '')
+                        ? u.avatar_url
+                        : `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(rawName)}`;
+
+                    return {
+                        id: t.id,
+                        user: rawName,
+                        avatar,
+                        task: t.source || t.method || 'Task',
+                        provider: t.method || t.source || 'Offer',
+                        amount: Number(t.amount) || 0,
+                    };
+                });
+                return res.json(enriched);
             }
         } catch (sbErr) {
             console.warn('Supabase earning feed notice:', sbErr.message);
