@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 
 const { pool } = require('../../db');
+const { supabase } = require('../../supabase');
 const {
   USER_PAYOUT_RATIO,
   MIN_POSTBACK_AMOUNT,
@@ -104,6 +105,48 @@ const handleSkylupPostback = async (req, res) => {
 
       await client.query('COMMIT');
       console.log(`[Skylup Postback] Successfully credited $${userEarnUsd} to user #${user.id} (tx: ${txId})`);
+
+      // 5. Also sync to Supabase so frontend profile instantly updates
+      if (supabase) {
+        try {
+          const { data: sbUser } = await supabase
+            .from('users')
+            .select('id, balance, total_earned, completed_tasks')
+            .or(`id.eq.${user.id},earn_id.eq.${userId}`)
+            .maybeSingle();
+
+          if (sbUser) {
+            const newBal = Number((Number(sbUser.balance || 0) + userEarnUsd).toFixed(2));
+            const newTot = Number((Number(sbUser.total_earned || 0) + userEarnUsd).toFixed(2));
+            const newComp = (sbUser.completed_tasks || 0) + 1;
+
+            await supabase
+              .from('users')
+              .update({
+                balance: newBal,
+                total_earned: newTot,
+                completed_tasks: newComp,
+              })
+              .eq('id', sbUser.id);
+
+            await supabase
+              .from('transactions')
+              .upsert({
+                id: txId,
+                user_id: sbUser.id,
+                type: 'earning',
+                method: 'Pixylab',
+                amount: userEarnUsd,
+                status: 'completed',
+                date: new Date().toISOString(),
+                source: offerDescription,
+              });
+            console.log(`[Skylup Postback] Supabase sync completed for user #${sbUser.id}`);
+          }
+        } catch (sbErr) {
+          console.warn('[Skylup Postback] Supabase sync notice:', sbErr.message);
+        }
+      }
 
       return res.status(200).send('OK');
     } catch (dbErr) {
