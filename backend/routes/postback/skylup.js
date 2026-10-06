@@ -1,23 +1,36 @@
-// backend/routes/postback/skylup.js
-const express = require('express');
-const router = express.Router();
+// api/postback/skylup.js - Dedicated Vercel Serverless Postback Handler
+import { createClient } from '@supabase/supabase-js';
 
-const { pool } = require('../../db');
-const { supabase } = require('../../supabase');
-const {
-  USER_PAYOUT_RATIO,
-  MIN_POSTBACK_AMOUNT,
-  parseUsdAmount,
-  toMoney,
-} = require('../../config/earnings');
+const supabaseUrl =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  'https://ohngslvxuokstopokkfc.supabase.co';
 
-/**
- * Skylup (Pixylab) Postback Handler
- * Supports both Vercel Serverless (Supabase-first) and full-stack PostgreSQL.
- */
-const handleSkylupPostback = async (req, res) => {
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  'sb_publishable_73ltiA_P1XtjTbrUMFk6yw_jO9SkPPo';
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const USER_PAYOUT_RATIO = 0.7; // User 70%, Platform 30%
+
+export default async function handler(req, res) {
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   try {
-    const params = { ...req.query, ...req.body };
+    const params = { ...(req.query || {}), ...(req.body || {}) };
 
     const userId = String(
       params.user_id ||
@@ -37,144 +50,93 @@ const handleSkylupPostback = async (req, res) => {
       ''
     ).trim();
 
-    const rawPayout = params.payout || params.amount || '0';
+    const rawPayout = parseFloat(params.payout || params.amount || '0');
     const offerId = String(params.offer_id || params.offerId || '').trim();
 
     if (!userId || !externalTx) {
-      console.warn('[Skylup Postback] Missing user_id or trans_id:', params);
+      console.warn('[Vercel Skylup Postback] Missing user_id or trans_id:', params);
       return res.status(400).send('MISSING_USER_OR_TX');
     }
 
-    const amt = parseUsdAmount(rawPayout);
-    if (amt === null || amt < (MIN_POSTBACK_AMOUNT || 0.01)) {
-      console.warn(`[Skylup Postback] Ignored zero or invalid payout: ${rawPayout}`);
+    if (isNaN(rawPayout) || rawPayout < 0.01) {
+      console.warn(`[Vercel Skylup Postback] Zero or invalid payout: ${rawPayout}`);
       return res.status(200).send('IGNORED_ZERO_PAYOUT');
     }
 
     const txId = `SKYLUP_${externalTx}`;
-    const userEarnUsd = toMoney(amt * (USER_PAYOUT_RATIO || 0.7)); // 70% user payout
+    const userEarnUsd = Math.round(rawPayout * USER_PAYOUT_RATIO * 100) / 100;
     const offerDescription = offerId ? `Pixylab Offer #${offerId}` : 'Pixylab Offer';
-    let userCredited = false;
 
-    // 1. Supabase First (Used by Vercel & React Frontend)
-    if (supabase) {
-      try {
-        const { data: existingTx } = await supabase
-          .from('transactions')
-          .select('id')
-          .eq('id', txId)
-          .maybeSingle();
+    // 1. Idempotency Check (Supabase)
+    const { data: existingTx } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('id', txId)
+      .maybeSingle();
 
-        if (existingTx) {
-          console.log(`[Skylup Postback] Transaction ${txId} already handled.`);
-          return res.status(200).send('ALREADY_HANDLED');
-        }
-
-        let query = supabase.from('users').select('id, earn_id, balance, total_earned, completed_tasks');
-        if (String(userId).startsWith('rewardgrip') || String(userId).startsWith('rewarddrip')) {
-          query = query.eq('earn_id', userId);
-        } else if (!isNaN(Number(userId))) {
-          query = query.or(`id.eq.${userId},earn_id.eq.${userId}`);
-        } else {
-          query = query.eq('earn_id', userId);
-        }
-
-        const { data: userData, error: uErr } = await query.maybeSingle();
-
-        if (!uErr && userData) {
-          const newBal = Number((Number(userData.balance || 0) + userEarnUsd).toFixed(2));
-          const newTot = Number((Number(userData.total_earned || 0) + userEarnUsd).toFixed(2));
-          const newComp = (userData.completed_tasks || 0) + 1;
-
-          await supabase
-            .from('users')
-            .update({
-              balance: newBal,
-              total_earned: newTot,
-              completed_tasks: newComp,
-            })
-            .eq('id', userData.id);
-
-          await supabase
-            .from('transactions')
-            .upsert({
-              id: txId,
-              user_id: userData.id,
-              type: 'earning',
-              method: 'Pixylab',
-              amount: userEarnUsd,
-              status: 'completed',
-              date: new Date().toISOString(),
-              source: offerDescription,
-            });
-
-          userCredited = true;
-          console.log(`[Skylup Postback Supabase] Successfully credited $${userEarnUsd} to user #${userData.id} (${userId})`);
-        }
-      } catch (sbErr) {
-        console.warn('[Skylup Postback Supabase Warning]:', sbErr.message);
-      }
+    if (existingTx) {
+      console.log(`[Vercel Skylup Postback] Tx ${txId} already handled.`);
+      return res.status(200).send('ALREADY_HANDLED');
     }
 
-    // 2. PostgreSQL Sync (Optional, safe fallback if pool is configured)
-    if (pool && process.env.DATABASE_URL) {
-      try {
-        const client = await pool.connect();
-        try {
-          const existing = await client.query('SELECT id FROM transactions WHERE id = $1', [txId]);
-          if (existing.rows.length === 0) {
-            const userResult = await client.query(
-              'SELECT id, balance, total_earned FROM users WHERE earn_id = $1 OR id::text = $1',
-              [userId]
-            );
+    // 2. Find User (by earn_id or numeric ID)
+    let query = supabase
+      .from('users')
+      .select('id, earn_id, balance, total_earned, completed_tasks');
 
-            if (userResult.rows.length > 0) {
-              const user = userResult.rows[0];
-              await client.query('BEGIN');
-              await client.query(
-                `UPDATE users 
-                 SET balance = balance + $1, 
-                     total_earned = total_earned + $1,
-                     completed_tasks = COALESCE(completed_tasks, 0) + 1
-                 WHERE id = $2`,
-                [userEarnUsd, user.id]
-              );
-              await client.query(
-                `INSERT INTO transactions (id, user_id, type, method, amount, status, date, source)
-                 VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
-                 ON CONFLICT (id) DO NOTHING`,
-                [txId, user.id, 'earn', 'offer', userEarnUsd, 'completed', offerDescription]
-              );
-              await client.query('COMMIT');
-              userCredited = true;
-              console.log(`[Skylup Postback Postgres] Successfully credited $${userEarnUsd} to user #${user.id}`);
-            }
-          }
-        } finally {
-          client.release();
-        }
-      } catch (pgErr) {
-        console.warn('[Skylup Postback Postgres Notice]:', pgErr.message);
-      }
+    if (String(userId).startsWith('rewardgrip') || String(userId).startsWith('rewarddrip')) {
+      query = query.eq('earn_id', userId);
+    } else if (!isNaN(Number(userId))) {
+      query = query.or(`id.eq.${userId},earn_id.eq.${userId}`);
+    } else {
+      query = query.eq('earn_id', userId);
     }
 
-    if (userCredited) {
-      return res.status(200).send('OK');
+    const { data: userData, error: uErr } = await query.maybeSingle();
+
+    if (uErr || !userData) {
+      console.warn(`[Vercel Skylup Postback] User not found: ${userId}`);
+      return res.status(200).send('USER_NOT_FOUND');
     }
 
-    // Even if user not found, return 200 with notice so Skylup does not continuously retry
-    console.warn(`[Skylup Postback] User ${userId} could not be located in database.`);
-    return res.status(200).send('USER_NOT_FOUND');
+    // 3. Update Balance in Supabase
+    const newBal = Number((Number(userData.balance || 0) + userEarnUsd).toFixed(2));
+    const newTot = Number((Number(userData.total_earned || 0) + userEarnUsd).toFixed(2));
+    const newComp = (userData.completed_tasks || 0) + 1;
+
+    const { error: updateErr } = await supabase
+      .from('users')
+      .update({
+        balance: newBal,
+        total_earned: newTot,
+        completed_tasks: newComp,
+      })
+      .eq('id', userData.id);
+
+    if (updateErr) {
+      console.error('[Vercel Skylup Postback] User update error:', updateErr.message);
+      return res.status(500).send('DB_UPDATE_ERROR');
+    }
+
+    // 4. Insert Transaction in Supabase
+    await supabase.from('transactions').upsert({
+      id: txId,
+      user_id: userData.id,
+      type: 'earning',
+      method: 'Pixylab',
+      amount: userEarnUsd,
+      status: 'completed',
+      date: new Date().toISOString(),
+      source: offerDescription,
+    });
+
+    console.log(
+      `[Vercel Skylup Postback SUCCESS] Credited $${userEarnUsd} to user #${userData.id} (${userId}) (tx: ${txId})`
+    );
+
+    return res.status(200).send('OK');
   } catch (error) {
-    console.error('[Skylup Postback] Handler error:', error);
+    console.error('[Vercel Skylup Postback Fatal Error]:', error);
     return res.status(500).send('SERVER_ERROR');
   }
-};
-
-router.get('/skylup', handleSkylupPostback);
-router.post('/skylup', handleSkylupPostback);
-
-router.get('/pixylab', handleSkylupPostback);
-router.post('/pixylab', handleSkylupPostback);
-
-module.exports = router;
+}
