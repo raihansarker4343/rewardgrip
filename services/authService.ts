@@ -37,23 +37,22 @@ export const authService = {
           body: JSON.stringify({ email: cleanEmail, username: cleanUsername, password, referralCode }),
         });
 
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (response.ok) {
           const data = await response.json();
-          if (response.ok) {
-            return {
-              ok: true,
-              token: data.token,
-              requiresVerification: data.requiresVerification,
-              message: data.message || 'Account created successfully',
-            };
-          } else {
-            return {
-              ok: false,
-              message: data.message || 'Failed to sign up.',
-            };
-          }
+          return {
+            ok: true,
+            token: data.token,
+            requiresVerification: data.requiresVerification,
+            message: data.message || 'Account created successfully',
+          };
+        } else if (response.status < 500) {
+          const data = await response.json().catch(() => ({}));
+          return {
+            ok: false,
+            message: data.message || 'Failed to sign up.',
+          };
         }
+        console.warn('[AuthService] Backend returned 500, falling back to Supabase direct signup');
       } catch (err) {
         console.warn('[AuthService] Backend API signup unreachable, falling back to Supabase:', err);
       }
@@ -207,24 +206,23 @@ export const authService = {
           body: JSON.stringify({ email, password }),
         });
 
-        const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
+        if (response.ok) {
           const data = await response.json();
-          if (response.ok) {
-            return {
-              ok: true,
-              token: data.token,
-              requiresVerification: data.requiresVerification,
-              message: data.message,
-            };
-          } else {
-            return {
-              ok: false,
-              requiresVerification: data.requiresVerification,
-              message: data.message || 'Invalid email or password.',
-            };
-          }
+          return {
+            ok: true,
+            token: data.token,
+            requiresVerification: data.requiresVerification,
+            message: data.message,
+          };
+        } else if (response.status < 500) {
+          const data = await response.json().catch(() => ({}));
+          return {
+            ok: false,
+            requiresVerification: data.requiresVerification,
+            message: data.message || 'Invalid email or password.',
+          };
         }
+        console.warn('[AuthService] Backend returned 500, falling back to Supabase direct signin');
       } catch (err) {
         console.warn('[AuthService] Backend API signin unreachable, falling back to Supabase:', err);
       }
