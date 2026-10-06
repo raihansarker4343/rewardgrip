@@ -72,7 +72,8 @@ app.use(express.json());
 const cpxPostbackRoutes = require('./routes/postback/cpx');
 const bitlabsPostbackRoutes = require('./routes/postback/bitlabs');
 const timewallPostbackRoutes = require('./routes/postback/timewall');
-const skylupPostbackRoutes = require('./routes/postback/skylup');
+const skylupPostbackRaw = require('./routes/postback/skylup');
+const skylupPostbackRoutes = skylupPostbackRaw?.default || skylupPostbackRaw;
 
 // 👉 নতুন লাইনটি যোগ করুন:
 const cpxOffersRoutes = require('./routes/postback/offers/cpx_offers');
@@ -81,7 +82,9 @@ const skylupOffersRoutes = require('./routes/offers/skylup');
 app.use('/api/postback', cpxPostbackRoutes);     // /api/postback/cpx
 app.use('/api/postback', bitlabsPostbackRoutes); // /api/postback/bitlabs
 app.use('/api/postback', timewallPostbackRoutes);
-app.use('/api/postback', skylupPostbackRoutes);   // /api/postback/skylup & /api/postback/pixylab
+if (typeof skylupPostbackRoutes === 'function' || skylupPostbackRoutes?.handle) {
+  app.use('/api/postback', skylupPostbackRoutes);   // /api/postback/skylup & /api/postback/pixylab
+}
 
 // 👉 অফার ও সার্ভে লিস্ট পাওয়ার এন্ডপয়েন্ট:
 app.use('/api/surveys/cpx', cpxOffersRoutes); // /api/surveys/cpx/get-surveys
