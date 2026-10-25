@@ -1125,31 +1125,30 @@ app.get('/api/public/earning-feed', async (req, res) => {
 });
 
 app.get('/api/public/live-cashouts', async (req, res) => {
+    // 1. Try PostgreSQL
     try {
         if (pool && process.env.DATABASE_URL) {
             const [totalRes, itemsRes] = await Promise.all([
                 pool.query(`
                     SELECT COALESCE(SUM(amount), 0) AS total
                     FROM transactions
-                    WHERE type = 'Withdrawal'
-                      AND status = 'Completed'
+                    WHERE LOWER(type) = 'withdrawal'
+                      AND LOWER(status) = 'completed'
                       AND date >= NOW() - INTERVAL '30 days'
                 `),
                 pool.query(`
                     SELECT t.id, u.username, t.method, t.amount
                     FROM transactions t
                     JOIN users u ON t.user_id = u.id
-                    WHERE t.type = 'Withdrawal'
-                      AND status = 'Completed'
+                    WHERE LOWER(t.type) = 'withdrawal'
+                      AND LOWER(t.status) = 'completed'
                     ORDER BY t.date DESC
                     LIMIT 24
                 `),
             ]);
 
-            const total30Days = parseFloat(totalRes.rows[0].total) || 0;
-
             return res.json({
-                total30Days: Number(total30Days.toFixed(2)),
+                total30Days: Number((parseFloat(totalRes.rows[0].total) || 0).toFixed(2)),
                 items: itemsRes.rows.map((row) => ({
                     id: row.id,
                     method: row.method || 'PayPal',
@@ -1160,6 +1159,63 @@ app.get('/api/public/live-cashouts', async (req, res) => {
         }
     } catch (error) {
         console.warn('Postgres live cashouts notice:', error.message);
+    }
+
+    // 2. Query real database directly from Supabase (Vercel / Live Deployment)
+    if (supabase) {
+        try {
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            const { data: txs30Days } = await supabase
+                .from('transactions')
+                .select('amount')
+                .ilike('type', 'withdrawal')
+                .gte('date', thirtyDaysAgo);
+
+            let real30Days = (txs30Days || []).reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+            if (real30Days === 0) {
+                const { data: allWithdrawals } = await supabase
+                    .from('transactions')
+                    .select('amount')
+                    .ilike('type', 'withdrawal');
+                real30Days = (allWithdrawals || []).reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+            }
+
+            const { data: recentTxs } = await supabase
+                .from('transactions')
+                .select('id, amount, method, date, user_id')
+                .ilike('type', 'withdrawal')
+                .order('date', { ascending: false })
+                .limit(24);
+
+            if (recentTxs && recentTxs.length > 0) {
+                const userIds = [...new Set(recentTxs.map((t) => t.user_id).filter(Boolean))];
+                let userMap = new Map();
+                if (userIds.length > 0) {
+                    const { data: users } = await supabase
+                        .from('users')
+                        .select('id, username')
+                        .in('id', userIds);
+                    if (users) {
+                        userMap = new Map(users.map((u) => [u.id, u.username]));
+                    }
+                }
+
+                const items = recentTxs.map((t) => ({
+                    id: String(t.id),
+                    method: t.method || 'PayPal',
+                    user: userMap.get(t.user_id) || `User_${t.user_id}`,
+                    amount: Number(t.amount) || 0,
+                }));
+
+                return res.json({
+                    total30Days: Number(real30Days.toFixed(2)),
+                    items,
+                });
+            }
+        } catch (sbErr) {
+            console.warn('Supabase live-cashouts notice:', sbErr.message);
+        }
     }
 
     return res.json({ total30Days: 0, items: [] });
