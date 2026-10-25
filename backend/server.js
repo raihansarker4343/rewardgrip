@@ -938,16 +938,15 @@ app.get('/api/offer-walls', async (req, res) => {
 const FEED_EARNING_TYPES = ['Task Reward', 'earn', 'bonus_earn'];
 
 app.get('/api/public/home-stats', async (req, res) => {
+    // 1. Try PostgreSQL
     try {
         if (pool && process.env.DATABASE_URL) {
             const [signupsRes, withdrawRes, totalRes] = await Promise.all([
-                pool.query(
-                    "SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours'"
-                ),
+                pool.query("SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL '24 hours'"),
                 pool.query(`
                     SELECT COALESCE(AVG(amount), 0) AS avg
                     FROM transactions
-                    WHERE type = 'Withdrawal'
+                    WHERE LOWER(type) = 'withdrawal'
                       AND status = 'Completed'
                       AND date >= date_trunc('day', NOW() - INTERVAL '1 day')
                       AND date < date_trunc('day', NOW())
@@ -955,26 +954,65 @@ app.get('/api/public/home-stats', async (req, res) => {
                 pool.query('SELECT COALESCE(SUM(total_earned), 0) AS total FROM users'),
             ]);
 
-            const signups24h = parseInt(signupsRes.rows[0].count, 10);
-            const avgWithdrawYesterday = parseFloat(withdrawRes.rows[0].avg) || 0;
-            const totalEarned = parseFloat(totalRes.rows[0].total) || 0;
-
             return res.json({
-                signups24h,
+                signups24h: parseInt(signupsRes.rows[0].count, 10),
                 avgTimeToFirstCash: '17m 12s',
-                avgWithdrawYesterday: Number(avgWithdrawYesterday.toFixed(2)),
-                totalEarned: Number(totalEarned.toFixed(2)),
+                avgWithdrawYesterday: Number((parseFloat(withdrawRes.rows[0].avg) || 0).toFixed(2)),
+                totalEarned: Number((parseFloat(totalRes.rows[0].total) || 0).toFixed(2)),
             });
         }
     } catch (error) {
-        // Silently fall through to default stats
+        console.warn('Postgres home-stats notice:', error.message);
+    }
+
+    // 2. Query real database directly from Supabase (Vercel / Live Deployment)
+    if (supabase) {
+        try {
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+            const { count: signupsCount } = await supabase
+                .from('users')
+                .select('*', { count: 'exact', head: true })
+                .gte('created_at', oneDayAgo);
+
+            const { count: totalUsersCount } = await supabase
+                .from('users')
+                .select('*', { count: 'exact', head: true });
+
+            const { data: usersData } = await supabase
+                .from('users')
+                .select('id, created_at, total_earned');
+
+            const realTotalEarned = (usersData || []).reduce(
+                (acc, u) => acc + (Number(u.total_earned) || 0),
+                0
+            );
+
+            const { data: allWithdrawals } = await supabase
+                .from('transactions')
+                .select('amount')
+                .ilike('type', 'withdrawal');
+
+            let avgWithdraw = 0;
+            if (allWithdrawals && allWithdrawals.length > 0) {
+                avgWithdraw = allWithdrawals.reduce((sum, tx) => sum + Number(tx.amount || 0), 0) / allWithdrawals.length;
+            }
+
+            return res.json({
+                signups24h: typeof signupsCount === 'number' && signupsCount > 0 ? signupsCount : (totalUsersCount || 0),
+                avgTimeToFirstCash: '14m 20s',
+                avgWithdrawYesterday: Number(avgWithdraw.toFixed(2)),
+                totalEarned: Number(realTotalEarned.toFixed(2)),
+            });
+        } catch (sbErr) {
+            console.warn('Supabase home-stats notice:', sbErr.message);
+        }
     }
 
     res.json({
-        signups24h: 101137,
-        avgTimeToFirstCash: '17m 12s',
-        avgWithdrawYesterday: 22.90,
-        totalEarned: 300000000,
+        signups24h: 0,
+        avgTimeToFirstCash: '14m 20s',
+        avgWithdrawYesterday: 0,
+        totalEarned: 0,
     });
 });
 
